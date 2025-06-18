@@ -14,8 +14,8 @@ const dbConfig = {
     database: 'todolist',
 };
 
-const TELEGRAM_BOT_TOKEN = '-4912608559';
-const TELEGRAM_CHAT_ID = '7704188284:AAG3RXgoWmheQmxuLOGWY-PQzo1wfDlodCw';
+const TELEGRAM_BOT_TOKEN = '7704188284:AAG3RXgoWmheQmxuLOGWY-PQzo1wfDlodCw';
+const TELEGRAM_CHAT_ID = '-4912608559';
 
 function hashPassword(password) {
     return crypto.createHash('sha256').update(password).digest('hex');
