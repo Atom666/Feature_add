@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 const crypto = require('crypto');
+const https = require('https');
 const { parse } = require('querystring');
 const PORT = 3000;
 
@@ -13,6 +14,9 @@ const dbConfig = {
     database: 'todolist',
 };
 
+const TELEGRAM_BOT_TOKEN = '-4912608559';
+const TELEGRAM_CHAT_ID = '7704188284:AAG3RXgoWmheQmxuLOGWY-PQzo1wfDlodCw';
+
 function hashPassword(password) {
     return crypto.createHash('sha256').update(password).digest('hex');
 }
@@ -22,6 +26,12 @@ function parseCookies(req) {
     return Object.fromEntries(raw.split('; ').filter(Boolean).map(c => c.split('=')));
 }
 
+async function notifyTelegram(taskText, username = 'Unknown') {
+    const message = `📝 ${username} добавил задачу: ${taskText}`;
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(message)}`;
+    https.get(url, res => res.on('data', () => {})).on('error', err => console.error('Telegram error:', err));
+}
+
 async function retrieveListItems(userId) {
     const connection = await mysql.createConnection(dbConfig);
     const [rows] = await connection.execute('SELECT id, text FROM items WHERE user_id = ?', [userId]);
@@ -29,10 +39,11 @@ async function retrieveListItems(userId) {
     return rows;
 }
 
-async function addItemToDatabase(text, userId) {
+async function addItemToDatabase(text, userId, username) {
     const connection = await mysql.createConnection(dbConfig);
     await connection.execute('INSERT INTO items (text, user_id) VALUES (?, ?)', [text, userId]);
     await connection.end();
+    await notifyTelegram(text, username);
 }
 
 async function updateItemInDatabase(id, text) {
@@ -101,7 +112,7 @@ async function handleRequest(req, res) {
             const text = parsed.text?.trim();
             if (text && cookies.userId) {
                 try {
-                    await addItemToDatabase(text, cookies.userId);
+                    await addItemToDatabase(text, cookies.userId, cookies.user);
                     res.writeHead(302, { Location: '/' });
                     res.end();
                 } catch (err) {
