@@ -22,16 +22,16 @@ function parseCookies(req) {
     return Object.fromEntries(raw.split('; ').filter(Boolean).map(c => c.split('=')));
 }
 
-async function retrieveListItems() {
+async function retrieveListItems(userId) {
     const connection = await mysql.createConnection(dbConfig);
-    const [rows] = await connection.execute('SELECT id, text FROM items');
+    const [rows] = await connection.execute('SELECT id, text FROM items WHERE user_id = ?', [userId]);
     await connection.end();
     return rows;
 }
 
-async function addItemToDatabase(text) {
+async function addItemToDatabase(text, userId) {
     const connection = await mysql.createConnection(dbConfig);
-    await connection.execute('INSERT INTO items (text) VALUES (?)', [text]);
+    await connection.execute('INSERT INTO items (text, user_id) VALUES (?, ?)', [text, userId]);
     await connection.end();
 }
 
@@ -47,8 +47,8 @@ async function deleteItemFromDatabase(id) {
     await connection.end();
 }
 
-async function getHtmlRows() {
-    const todoItems = await retrieveListItems();
+async function getHtmlRows(userId) {
+    const todoItems = await retrieveListItems(userId);
     return todoItems.map((item, index) => `
         <tr>
             <td>${index + 1}</td>
@@ -77,12 +77,12 @@ async function handleRequest(req, res) {
             const html = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
             let processedHtml = '';
 
-            if (!cookies.user) {
+            if (!cookies.user || !cookies.userId) {
                 processedHtml = html.replace('{{rows}}', `
                     <tr><td colspan="3" style="text-align: center; color: grey;">Please log in to view your to-do list.</td></tr>
                 `);
             } else {
-                processedHtml = html.replace('{{rows}}', await getHtmlRows());
+                processedHtml = html.replace('{{rows}}', await getHtmlRows(cookies.userId));
             }
 
             res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -99,9 +99,9 @@ async function handleRequest(req, res) {
         req.on('end', async () => {
             const parsed = parse(body);
             const text = parsed.text?.trim();
-            if (text) {
+            if (text && cookies.userId) {
                 try {
-                    await addItemToDatabase(text);
+                    await addItemToDatabase(text, cookies.userId);
                     res.writeHead(302, { Location: '/' });
                     res.end();
                 } catch (err) {
@@ -110,7 +110,7 @@ async function handleRequest(req, res) {
                 }
             } else {
                 res.writeHead(400, { 'Content-Type': 'text/plain' });
-                res.end('Invalid item text');
+                res.end('Invalid item text or not logged in');
             }
         });
 
@@ -167,8 +167,10 @@ async function handleRequest(req, res) {
             const conn = await mysql.createConnection(dbConfig);
             try {
                 await conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', [username, password]);
+                const [rows] = await conn.execute('SELECT id FROM users WHERE username = ?', [username]);
+                const userId = rows[0].id;
                 res.writeHead(302, {
-                    'Set-Cookie': `user=${username}; HttpOnly`,
+                    'Set-Cookie': `user=${username}; userId=${userId}; HttpOnly`,
                     'Location': '/'
                 });
                 res.end();
@@ -188,11 +190,12 @@ async function handleRequest(req, res) {
             const username = data.get('username');
             const password = hashPassword(data.get('password'));
             const conn = await mysql.createConnection(dbConfig);
-            const [rows] = await conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', [username, password]);
+            const [rows] = await conn.execute('SELECT id FROM users WHERE username = ? AND password = ?', [username, password]);
             await conn.end();
             if (rows.length > 0) {
+                const userId = rows[0].id;
                 res.writeHead(302, {
-                    'Set-Cookie': `user=${username}; HttpOnly`,
+                    'Set-Cookie': `user=${username}; userId=${userId}; HttpOnly`,
                     'Location': '/'
                 });
                 res.end();
@@ -204,7 +207,7 @@ async function handleRequest(req, res) {
 
     } else if (req.method === 'GET' && req.url.startsWith('/logout')) {
         res.writeHead(302, {
-            'Set-Cookie': 'user=; Max-Age=0',
+            'Set-Cookie': 'user=; userId=; Max-Age=0',
             'Location': '/'
         });
         res.end();
