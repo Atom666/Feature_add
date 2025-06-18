@@ -8,8 +8,8 @@ const PORT = 3000;
 // Database connection settings
 const dbConfig = {
     host: 'localhost',
-    user: 'root',
-    password: '',
+    user: 'atom',
+    password: 'qweqwe123',
     database: 'todolist',
   };
 
@@ -76,6 +76,57 @@ async function handleRequest(req, res) {
             res.writeHead(500, { 'Content-Type': 'text/plain' });
             res.end('Error loading index.html');
         }
+    } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Route not found');
+    }
+}
+
+// Вверху файла подключите body-parser для обработки JSON тела
+const { parse } = require('querystring');
+
+// Функция добавления в базу данных
+async function addItemToDatabase(text) {
+    const connection = await mysql.createConnection(dbConfig);
+    const query = 'INSERT INTO items (text) VALUES (?)';
+    await connection.execute(query, [text]);
+    await connection.end();
+}
+
+// Обновлённый обработчик запросов
+async function handleRequest(req, res) {
+    if (req.method === 'GET' && req.url === '/') {
+        try {
+            const html = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
+            const processedHtml = html.replace('{{rows}}', await getHtmlRows());
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(processedHtml);
+        } catch (err) {
+            console.error(err);
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Error loading index.html');
+        }
+    } else if (req.method === 'POST' && req.url === '/add') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            const parsed = parse(body);
+            const text = parsed.text?.trim();
+
+            if (text) {
+                try {
+                    await addItemToDatabase(text);
+                    res.writeHead(302, { Location: '/' });
+                    res.end();
+                } catch (err) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Error adding item');
+                }
+            } else {
+                res.writeHead(400, { 'Content-Type': 'text/plain' });
+                res.end('Invalid item text');
+            }
+        });
     } else {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Route not found');
