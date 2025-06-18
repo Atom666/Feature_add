@@ -170,7 +170,10 @@ async function handleRequest(req, res) {
                 const [rows] = await conn.execute('SELECT id FROM users WHERE username = ?', [username]);
                 const userId = rows[0].id;
                 res.writeHead(302, {
-                    'Set-Cookie': `user=${username}; userId=${userId}; HttpOnly`,
+                    'Set-Cookie': [
+                    `user=${username}; HttpOnly`,
+                    `userId=${userId}; HttpOnly`
+                    ],
                     'Location': '/'
                 });
                 res.end();
