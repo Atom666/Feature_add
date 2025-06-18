@@ -171,8 +171,8 @@ async function handleRequest(req, res) {
                 const userId = rows[0].id;
                 res.writeHead(302, {
                     'Set-Cookie': [
-                    `user=${username}; HttpOnly`,
-                    `userId=${userId}; HttpOnly`
+                        `user=${username}; HttpOnly`,
+                        `userId=${userId}; HttpOnly`
                     ],
                     'Location': '/'
                 });
@@ -198,7 +198,10 @@ async function handleRequest(req, res) {
             if (rows.length > 0) {
                 const userId = rows[0].id;
                 res.writeHead(302, {
-                    'Set-Cookie': `user=${username}; userId=${userId}; HttpOnly`,
+                    'Set-Cookie': [
+                        `user=${username}; HttpOnly`,
+                        `userId=${userId}; HttpOnly`
+                    ],
                     'Location': '/'
                 });
                 res.end();
@@ -210,7 +213,10 @@ async function handleRequest(req, res) {
 
     } else if (req.method === 'GET' && req.url.startsWith('/logout')) {
         res.writeHead(302, {
-            'Set-Cookie': 'user=; userId=; Max-Age=0',
+            'Set-Cookie': [
+                'user=; Max-Age=0',
+                'userId=; Max-Age=0'
+            ],
             'Location': '/'
         });
         res.end();
