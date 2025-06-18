@@ -202,7 +202,7 @@ async function handleRequest(req, res) {
             }
         });
 
-    } else if (req.method === 'GET' && req.url === '/logout') {
+    } else if (req.method === 'GET' && req.url.startsWith('/logout')) {
         res.writeHead(302, {
             'Set-Cookie': 'user=; Max-Age=0',
             'Location': '/'
