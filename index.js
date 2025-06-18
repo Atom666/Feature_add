@@ -2,44 +2,53 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
-
+const crypto = require('crypto');
+const { parse } = require('querystring');
 const PORT = 3000;
 
-// Database connection settings
 const dbConfig = {
     host: 'localhost',
     user: 'atom',
     password: 'qweqwe123',
     database: 'todolist',
-  };
+};
 
+function hashPassword(password) {
+    return crypto.createHash('sha256').update(password).digest('hex');
+}
 
-  async function retrieveListItems() {
-    try {
-      // Create a connection to the database
-      const connection = await mysql.createConnection(dbConfig);
-      
-      // Query to select all items from the database
-      const query = 'SELECT id, text FROM items';
-      
-      // Execute the query
-      const [rows] = await connection.execute(query);
-      
-      // Close the connection
-      await connection.end();
-      
-      // Return the retrieved items as a JSON array
-      return rows;
-    } catch (error) {
-      console.error('Error retrieving list items:', error);
-      throw error; // Re-throw the error
-    }
-  }
+function parseCookies(req) {
+    const raw = req.headers.cookie || '';
+    return Object.fromEntries(raw.split('; ').filter(Boolean).map(c => c.split('=')));
+}
 
-// Stub function for generating HTML rows
+async function retrieveListItems() {
+    const connection = await mysql.createConnection(dbConfig);
+    const [rows] = await connection.execute('SELECT id, text FROM items');
+    await connection.end();
+    return rows;
+}
+
+async function addItemToDatabase(text) {
+    const connection = await mysql.createConnection(dbConfig);
+    await connection.execute('INSERT INTO items (text) VALUES (?)', [text]);
+    await connection.end();
+}
+
+async function updateItemInDatabase(id, text) {
+    const connection = await mysql.createConnection(dbConfig);
+    await connection.execute('UPDATE items SET text = ? WHERE id = ?', [text, id]);
+    await connection.end();
+}
+
+async function deleteItemFromDatabase(id) {
+    const connection = await mysql.createConnection(dbConfig);
+    await connection.execute('DELETE FROM items WHERE id = ?', [id]);
+    await connection.end();
+}
+
 async function getHtmlRows() {
     const todoItems = await retrieveListItems();
-
     return todoItems.map((item, index) => `
         <tr>
             <td>${index + 1}</td>
@@ -60,48 +69,22 @@ async function getHtmlRows() {
     `).join('');
 }
 
-// Modified request handler with template replacement
 async function handleRequest(req, res) {
-    if (req.url === '/') {
-        try {
-            const html = await fs.promises.readFile(
-                path.join(__dirname, 'index.html'), 
-                'utf8'
-            );
-            
-            // Replace template placeholder with actual content
-            const processedHtml = html.replace('{{rows}}', await getHtmlRows());
-            
-            res.writeHead(200, { 'Content-Type': 'text/html' });
-            res.end(processedHtml);
-        } catch (err) {
-            console.error(err);
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end('Error loading index.html');
-        }
-    } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Route not found');
-    }
-}
+    const cookies = parseCookies(req);
 
-// Вверху файла подключите body-parser для обработки JSON тела
-const { parse } = require('querystring');
-
-// Функция добавления в базу данных
-async function addItemToDatabase(text) {
-    const connection = await mysql.createConnection(dbConfig);
-    const query = 'INSERT INTO items (text) VALUES (?)';
-    await connection.execute(query, [text]);
-    await connection.end();
-}
-
-// Обновлённый обработчик запросов
-async function handleRequest(req, res) {
     if (req.method === 'GET' && req.url === '/') {
         try {
             const html = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
-            const processedHtml = html.replace('{{rows}}', await getHtmlRows());
+            let processedHtml = '';
+
+            if (!cookies.user) {
+                processedHtml = html.replace('{{rows}}', `
+                    <tr><td colspan="3" style="text-align: center; color: grey;">Please log in to view your to-do list.</td></tr>
+                `);
+            } else {
+                processedHtml = html.replace('{{rows}}', await getHtmlRows());
+            }
+
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(processedHtml);
         } catch (err) {
@@ -109,13 +92,13 @@ async function handleRequest(req, res) {
             res.writeHead(500, { 'Content-Type': 'text/plain' });
             res.end('Error loading index.html');
         }
+
     } else if (req.method === 'POST' && req.url === '/add') {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             const parsed = parse(body);
             const text = parsed.text?.trim();
-
             if (text) {
                 try {
                     await addItemToDatabase(text);
@@ -130,20 +113,19 @@ async function handleRequest(req, res) {
                 res.end('Invalid item text');
             }
         });
+
     } else if (req.method === 'POST' && req.url === '/delete') {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             const parsed = new URLSearchParams(body);
             const id = parseInt(parsed.get('id'), 10);
-
             if (!isNaN(id)) {
                 try {
                     await deleteItemFromDatabase(id);
                     res.writeHead(302, { Location: '/' });
                     res.end();
                 } catch (err) {
-                    console.error(err);
                     res.writeHead(500, { 'Content-Type': 'text/plain' });
                     res.end('Error deleting item');
                 }
@@ -152,50 +134,86 @@ async function handleRequest(req, res) {
                 res.end('Invalid ID');
             }
         });
-    } else if (req.method === 'POST' && req.url === '/edit') {
-            let body = '';
-            req.on('data', chunk => body += chunk);
-            req.on('end', async () => {
-                const parsed = new URLSearchParams(body);
-                const id = parseInt(parsed.get('id'), 10);
-                const text = parsed.get('text')?.trim();
 
-                if (!isNaN(id) && text) {
-                    try {
-                        await updateItemInDatabase(id, text);
-                        res.writeHead(302, { Location: '/' });
-                        res.end();
-                    } catch (err) {
-                        console.error(err);
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Error updating item');
-                    }
-                } else {
-                    res.writeHead(400, { 'Content-Type': 'text/plain' });
-                    res.end('Invalid data');
+    } else if (req.method === 'POST' && req.url === '/edit') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            const parsed = new URLSearchParams(body);
+            const id = parseInt(parsed.get('id'), 10);
+            const text = parsed.get('text')?.trim();
+            if (!isNaN(id) && text) {
+                try {
+                    await updateItemInDatabase(id, text);
+                    res.writeHead(302, { Location: '/' });
+                    res.end();
+                } catch (err) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Error updating item');
                 }
-            });
-        }
-    else {
+            } else {
+                res.writeHead(400, { 'Content-Type': 'text/plain' });
+                res.end('Invalid data');
+            }
+        });
+
+    } else if (req.method === 'POST' && req.url === '/register') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            const data = new URLSearchParams(body);
+            const username = data.get('username');
+            const password = hashPassword(data.get('password'));
+            const conn = await mysql.createConnection(dbConfig);
+            try {
+                await conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', [username, password]);
+                res.writeHead(302, {
+                    'Set-Cookie': `user=${username}; HttpOnly`,
+                    'Location': '/'
+                });
+                res.end();
+            } catch (err) {
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('User already exists or error');
+            } finally {
+                await conn.end();
+            }
+        });
+
+    } else if (req.method === 'POST' && req.url === '/login') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', async () => {
+            const data = new URLSearchParams(body);
+            const username = data.get('username');
+            const password = hashPassword(data.get('password'));
+            const conn = await mysql.createConnection(dbConfig);
+            const [rows] = await conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', [username, password]);
+            await conn.end();
+            if (rows.length > 0) {
+                res.writeHead(302, {
+                    'Set-Cookie': `user=${username}; HttpOnly`,
+                    'Location': '/'
+                });
+                res.end();
+            } else {
+                res.writeHead(401, { 'Content-Type': 'text/plain' });
+                res.end('Invalid credentials');
+            }
+        });
+
+    } else if (req.method === 'GET' && req.url === '/logout') {
+        res.writeHead(302, {
+            'Set-Cookie': 'user=; Max-Age=0',
+            'Location': '/'
+        });
+        res.end();
+
+    } else {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Route not found');
     }
 }
 
-async function updateItemInDatabase(id, text) {
-    const connection = await mysql.createConnection(dbConfig);
-    await connection.execute('UPDATE items SET text = ? WHERE id = ?', [text, id]);
-    await connection.end();
-}
-
-async function deleteItemFromDatabase(id) {
-    const connection = await mysql.createConnection(dbConfig);
-    const query = 'DELETE FROM items WHERE id = ?';
-    await connection.execute(query, [id]);
-    await connection.end();
-}
-
-
-// Create and start server
 const server = http.createServer(handleRequest);
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
