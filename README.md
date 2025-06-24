@@ -17,3 +17,4 @@
 - ОС: Debian 12
 - URL: http://82.202.130.173:3000/
 - Группа куда приходят уведомления о создании задач в веб-приложении: https://t.me/+9qRqMPnCRBYzZmQy
+- Отчёт по лабораторной работе: [Тут](https://github.com/Atom666/Feature_add/blob/feature_telegram/%D0%9E%D1%82%D1%87%D1%91%D1%82.pdf)
